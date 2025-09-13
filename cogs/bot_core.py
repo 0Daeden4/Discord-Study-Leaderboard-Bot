@@ -1,6 +1,7 @@
-from discord import app_commands, DMChannel, Forbidden, Message, Interaction
+from discord import app_commands, DMChannel, Forbidden, Message, Interaction, Embed, Color, NotFound
 from discord.ext import commands
 from database_manager import DatabaseManager
+import datetime
 import asyncio
 
 
@@ -10,13 +11,8 @@ class BotCore(commands.Cog):
         print("BotCore Cog loaded.")
         self.db = database
 
-    @commands.command(name="ping")
-    async def ping(self, ctx: commands.Context):
-        await ctx.send(f"Pong! Latency: {round(self.bot.latency * 1000)}ms")
-
     async def _send_await_pm_interaction(self, interaction: Interaction, message_content: str):
         author = interaction.user
-
         try:
             await author.send(message_content)
 
@@ -65,17 +61,22 @@ class BotCore(commands.Cog):
     @app_commands.command(name="create_lobby", description="Creates a new study lobby.")
     @app_commands.describe(
         name="The name of the lobby.",
-        is_encrypted="Should the lobby be encrypted? (Default: False)",
         is_public="Should the lobby be public? (Default: False)"
     )
-    async def create_lobby(self, interaction: Interaction, name: str, is_encrypted: bool = False, is_public: bool = False):
+    async def create_lobby(self, interaction: Interaction, name: str,  is_public: bool = False):
         user_id = str(interaction.user.id)
         author = interaction.user
-        print("Test")
         await interaction.response.defer()
+        user_has_room = await self.db.add_lobby_to_user_table(user_id, "temporary")
+
+        if not user_has_room:
+            await interaction.followup.send("You don't have room for a new lobby. Limit of 10 lobbies is reached.")
+            return
+        else:
+            await self.db.remove_lobby_from_user_table(user_id, "temporary")
 
         password = None
-        if is_encrypted or not is_public:
+        if not is_public:
             password = await self._send_await_pm_interaction(interaction, "Please type your password here.")
             if password is None or password.content == "":
                 await author.send("Password could not be empty!")
@@ -86,15 +87,96 @@ class BotCore(commands.Cog):
         try:
             hash = await self.db.create_lobby(user_id=user_id,
                                               name=name,
-                                              is_encrypted=is_encrypted,
                                               is_public=is_public,
                                               password=password.content if password is not None else None
                                               )
         except Exception as e:
             print(f"DEBUG: ERROR! An exception occurred: {e}")
-            await interaction.followup.send("HAHAHAHAHAH EXCEPTION!")
+            await interaction.followup.send("An unexpected error has occured...")
 
         await interaction.followup.send(f"Lobby '{name}' was created... Don't forget the value below!\nLeaderboard hash: {hash}")
+
+    @app_commands.command(name="start_chrono",  description="Starts the chronometer for your studies")
+    @app_commands.describe(lobby_hash="Hash value of the lobby. Can be found under 'my lobbies'")
+    async def start_chrono(self, interaction: Interaction, lobby_hash: str):
+        await interaction.response.defer()
+        user_id = str(interaction.user.id)
+        dttm = interaction.created_at
+        started_chrono = await self.db.start_chrono(lobby_hash, user_id, dttm)
+        lobby_name = await self.db.get_lobby_name(lobby_hash)
+        if started_chrono:
+            await interaction.followup.send(f"Chronometer started for lobby: **{lobby_name}**")
+        return
+
+    @app_commands.command(name="stop_chrono",  description="Stops the chronometer for your studies")
+    @app_commands.describe(lobby_hash="Hash value of the lobby. Can be found under 'my lobbies'")
+    async def stop_chrono(self, interaction: Interaction, lobby_hash: str):
+        await interaction.response.defer()
+        user_id = str(interaction.user.id)
+        dttm = interaction.created_at
+        stopped_chrono, recorded_seconds = await self.db.stop_chrono(lobby_hash, user_id, dttm)
+        lobby_name = await self.db.get_lobby_name(lobby_hash)
+        if stopped_chrono:
+
+            total_minutes, seconds = divmod(recorded_seconds, 60)
+            hours, minutes = divmod(total_minutes, 60)
+            await interaction.followup.send(f"Chronometer stopped for lobby: **{lobby_name}**.\n" +
+                                            f"Studied for: **{hours}** Hours, **{minutes}** Minutes and **{seconds}** Seconds.")
+        return
+
+    @app_commands.command(name="my_lobbies",  description="Lists your lobbies")
+    async def my_lobbies(self, interaction: Interaction):
+        await interaction.response.defer()
+        user_id = str(interaction.user.id)
+        user_lobby_hashes = await self.db.get_user_lobbies(user_id)
+        out_string = ""
+        if user_lobby_hashes is None or user_lobby_hashes == []:
+            await interaction.followup.send("You are not in any lobbies yet!")
+            return
+
+        for lobby_hash in user_lobby_hashes:
+            print(lobby_hash)
+            lobby_name = await self.db.get_lobby_name(lobby_hash)
+            out_string += f":gear:Lobby Name: **{lobby_name}**\n:hammer:Lobby Hash: ||**{lobby_hash}**||\n\n"
+
+        await interaction.followup.send(out_string)
+
+    @app_commands.command(name="leaderboard",  description="Displays the leaderboard for the given lobby.")
+    @app_commands.describe(lobby_hash="Hash value of the lobby. Can be found under 'my lobbies'")
+    async def leaderboard(self, interaction: Interaction, lobby_hash: str):
+        await interaction.response.defer()
+        user_id = str(interaction.user.id)
+        lobby_name = await self.db.get_lobby_name(lobby_hash)
+        embed = Embed(
+            title=f"🏆 {lobby_name}",
+            description="Top students based on their total study time.",
+            color=Color.gold()
+        )
+
+        leaderboard_text = ""
+        users = await self.db.get_lobby_users(lobby_hash)
+        for i, user_dict in enumerate(users, 1):
+            try:
+                user_id = user_dict["user_id"]
+                user = await self.bot.fetch_user(user_id)
+                user_mention = user.mention
+            except NotFound:
+                user_mention = f"Unknown User ({user_id})"
+
+            total_seconds = user_dict["total_seconds"]
+            minutes, seconds = divmod(total_seconds, 60)
+            hours, minutes = divmod(minutes, 60)
+            leaderboard_text += (
+                f"**{i}.** {user_mention}\n"
+                f"> **Hours:** {hours}, **Minutes:** {minutes}, **Seconds:** {seconds}\n\n"
+            )
+        if leaderboard_text:
+            embed.description = leaderboard_text
+        else:
+            embed.description = "The leaderboard is empty!"
+        await interaction.followup.send(embed=embed)
+
+        return
 
 
 async def setup(bot: commands.Bot):

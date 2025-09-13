@@ -30,7 +30,7 @@ class Bot(commands.Bot):
         if message.author == self.user:
             return
 
-        await self.send_message_back(message, "Spam Test")
+        # await self.send_message_back(message, "Spam Test")
 
         await self.process_commands(message)
 

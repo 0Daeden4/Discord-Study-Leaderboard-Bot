@@ -67,13 +67,11 @@ class BotCore(commands.Cog):
         user_id = str(interaction.user.id)
         author = interaction.user
         await interaction.response.defer()
-        user_has_room = await self.db.add_lobby_to_user_table(user_id, "temporary")
 
-        if not user_has_room:
+        user_has_free_slots = await self.db.user_has_free_slots(user_id)
+        if not user_has_free_slots:
             await interaction.followup.send("You don't have room for a new lobby. Limit of 10 lobbies is reached.")
             return
-        else:
-            await self.db.remove_lobby_from_user_table(user_id, "temporary")
 
         password = None
         if not is_public:
@@ -155,7 +153,8 @@ class BotCore(commands.Cog):
 
         leaderboard_text = ""
         users = await self.db.get_lobby_users(lobby_hash)
-        for i, user_dict in enumerate(users, 1):
+        users_list: list[tuple[str, int]] = []
+        for user_dict in users:
             try:
                 user_id = user_dict["user_id"]
                 user = await self.bot.fetch_user(user_id)
@@ -164,10 +163,14 @@ class BotCore(commands.Cog):
                 user_mention = f"Unknown User ({user_id})"
 
             total_seconds = user_dict["total_seconds"]
+            users_list.append((user_mention, total_seconds))
+
+        users_list.sort(key=lambda x: x[1], reverse=True)
+        for i, (mention, total_seconds) in enumerate(users_list, 1):
             minutes, seconds = divmod(total_seconds, 60)
             hours, minutes = divmod(minutes, 60)
             leaderboard_text += (
-                f"**{i}.** {user_mention}\n"
+                f"**{i}.** {mention}\n"
                 f"> **Hours:** {hours}, **Minutes:** {minutes}, **Seconds:** {seconds}\n\n"
             )
         if leaderboard_text:
@@ -175,6 +178,39 @@ class BotCore(commands.Cog):
         else:
             embed.description = "The leaderboard is empty!"
         await interaction.followup.send(embed=embed)
+
+        return
+
+    @app_commands.command(name="join",  description="Tries joining a certain lobby.")
+    @app_commands.describe(lobby_hash="Hash value of the lobby")
+    async def join(self, interaction: Interaction, lobby_hash: str):
+        await interaction.response.defer()
+
+        lobby_exists = await self.db.check_lobby_all(lobby_hash)
+        if not lobby_exists:
+            await interaction.followup.send(f"Could not join lobby with hash: **{lobby_hash}** . " +
+                                            "Check if both the hash and password are correct")
+            return
+
+        # TODO: combine password check in one function
+        is_public = await self.db.is_public(lobby_hash)
+        password = None
+        if not is_public:
+            message = await self._send_await_pm_interaction(interaction, "Enter the password for the lobby you are trying to join.")
+            if message is None:
+                await interaction.followup.send(f"Could not join lobby with hash: **{lobby_hash}** . " +
+                                                "Check if both the hash and password are correct")
+                return
+            password = message.content
+
+        user_id = str(interaction.user.id)
+        user_added = await self.db.join_lobby(lobby_hash, user_id, password)
+        lobby_name = await self.db.get_lobby_name(lobby_hash)
+        if user_added:
+            await interaction.followup.send(f"You have joined **{lobby_name}** !\n||Hash: {lobby_hash}||")
+        else:
+            await interaction.followup.send(f"Could not join lobby with hash: **{lobby_hash}** . " +
+                                            "Check if both the hash and password are correct")
 
         return
 

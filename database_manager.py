@@ -73,21 +73,21 @@ class DatabaseManager:
         print(f"Successfully created lobby '{name}' with hash: {lobby_hash}")
         return lobby_hash
 
-    async def lobby_table_exists(self, lobby_hash: str) -> bool:
+    async def _lobby_table_exists(self, lobby_hash: str) -> bool:
         table_name = f"lobby_{lobby_hash}"
         async with aiosqlite.connect(self.DB_FILE) as db:
             cursor = await db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table_name,))
             result = await cursor.fetchone()
             return result is not None
 
-    async def lobby_exists(self, lobby_hash: str) -> bool:
+    async def _lobby_exists(self, lobby_hash: str) -> bool:
         async with aiosqlite.connect(self.DB_FILE) as db:
             cursor = await db.execute("SELECT 1 FROM Lobbies WHERE hash=?", (lobby_hash,))
             result = await cursor.fetchone()
             return result is not None
 
     async def is_public(self, lobby_hash: str) -> bool:
-        if not await self.lobby_exists(lobby_hash):
+        if not await self._lobby_exists(lobby_hash):
             return False
         async with aiosqlite.connect(self.DB_FILE) as db:
             cursor = await db.execute("SELECT is_public FROM Lobbies WHERE hash=?", (lobby_hash,))
@@ -105,6 +105,15 @@ class DatabaseManager:
             cursor = await db.execute(query, (effective_user_id,))
             result = await cursor.fetchone()
             return bool(result[0]) if result else False
+
+    async def user_has_free_slots(self, user_id: str) -> bool:
+        user_has_room = await self.add_lobby_to_user_table(user_id, "temporary")
+
+        if not user_has_room:
+            return False
+        else:
+            await self.remove_lobby_from_user_table(user_id, "temporary")
+            return True
 
     async def add_user_to_lobby(self, lobby_hash: str, user_id_adder: str, user_id_to_add: str, is_admin: bool = False) -> bool:
         is_adder_admin = await self.is_admin(user_id_adder, lobby_hash)
@@ -134,6 +143,39 @@ class DatabaseManager:
                 print(
                     f"User {user_id_to_add} already exists in lobby {lobby_hash}")
                 return False
+
+    async def check_lobby_all(self, lobby_hash: str) -> bool:
+        lobby_exists = await self._lobby_exists(lobby_hash)
+        lobby_table_exists = await self._lobby_table_exists(lobby_hash)
+        return lobby_exists and lobby_table_exists
+
+    async def join_lobby(self, lobby_hash: str, user_id: str, password: str | None) -> bool:
+        user_has_free_slots = await self.user_has_free_slots(user_id)
+        if not user_has_free_slots:
+            return False
+
+        lobby_exists = await self.check_lobby_all(lobby_hash)
+        if not lobby_exists:
+            return False
+
+        lobby_is_public = await self.is_public(lobby_hash)
+        if not lobby_is_public and password is None:
+            return False
+        elif not lobby_is_public:
+            lobby_password_hash = await self.get_lobby_password_hash(lobby_hash)
+            if lobby_password_hash is None:
+                print("This should not happen. Password hash for private lobby is None.")
+                return False
+            # TODO make prettier
+            assert (password is not None)
+            passwords_correct = self._security.check_password(
+                password, lobby_password_hash)
+            if not passwords_correct:
+                return False
+
+        user_added = await self.add_user_to_lobby(lobby_hash, "admin", user_id)
+
+        return user_added
 
     async def remove_user_from_lobby(self, lobby_hash: str, user_id_remover: str, user_id_to_remove: str, password: Optional[str] = None) -> bool:
 
@@ -165,8 +207,22 @@ class DatabaseManager:
                 return False
 
     async def get_lobby_name(self, lobby_hash: str) -> Optional[str]:
+
+        lobby_exists = await self.check_lobby_all(lobby_hash)
+        if not lobby_exists:
+            return None
+
         async with aiosqlite.connect(self.DB_FILE) as db:
             cursor = await db.execute("SELECT name FROM Lobbies WHERE hash = ?", (lobby_hash,))
+            result = await cursor.fetchone()
+            return result[0] if result else None
+
+    async def get_lobby_password_hash(self, lobby_hash: str) -> Optional[str]:
+        lobby_exists = await self.check_lobby_all(lobby_hash)
+        if not lobby_exists:
+            return None
+        async with aiosqlite.connect(self.DB_FILE) as db:
+            cursor = await db.execute("SELECT password FROM Lobbies WHERE hash = ?", (lobby_hash,))
             result = await cursor.fetchone()
             return result[0] if result else None
 
@@ -186,8 +242,9 @@ class DatabaseManager:
             print(f"Successfully deleted lobby with hash: {lobby_hash}")
 
     async def get_lobby_users(self, lobby_hash: str) -> List[Dict[str, Any]]:
-        if not await self.lobby_exists(lobby_hash):
-            print(f"Lobby with hash '{lobby_hash}' does not exist.")
+
+        lobby_exists = await self.check_lobby_all(lobby_hash)
+        if not lobby_exists:
             return []
 
         table_name = f"lobby_{lobby_hash}"
@@ -286,7 +343,7 @@ class DatabaseManager:
             return result is not None
 
     async def start_chrono(self, lobby_hash: str, user_id: str, time: datetime.datetime) -> bool:
-        if not await self.lobby_exists(lobby_hash) or not await self.is_in_lobby(user_id, lobby_hash):
+        if not await self._lobby_exists(lobby_hash) or not await self.is_in_lobby(user_id, lobby_hash):
             return False
 
         table_name = f"lobby_{lobby_hash}"
@@ -304,7 +361,7 @@ class DatabaseManager:
             return True
 
     async def stop_chrono(self, lobby_hash: str, user_id: str, time: datetime.datetime) -> tuple[bool, int]:
-        if not await self.lobby_exists(lobby_hash) or not await self.is_in_lobby(user_id, lobby_hash):
+        if not await self._lobby_exists(lobby_hash) or not await self.is_in_lobby(user_id, lobby_hash):
             return (False, 0)
 
         table_name = f"lobby_{lobby_hash}"

@@ -39,4 +39,5 @@ if __name__ == "__main__":
                             " --testing_guild_id", required=False)
     arg_parser.add_argument("-tgid", "--testing_guild_id", type=int,
                             help="Set the testing guild id for instant command updates.", required=False)
-    arg_parser.parse_args()
+    args = arg_parser.parse_args()
+    main(args)

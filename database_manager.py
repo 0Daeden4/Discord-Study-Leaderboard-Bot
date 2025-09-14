@@ -222,7 +222,7 @@ class DatabaseManager:
         if not lobby_exists:
             return None
         async with aiosqlite.connect(self.DB_FILE) as db:
-            cursor = await db.execute("SELECT password FROM Lobbies WHERE hash = ?", (lobby_hash,))
+            cursor = await db.execute("SELECT password_hash FROM Lobbies WHERE hash = ?", (lobby_hash,))
             result = await cursor.fetchone()
             return result[0] if result else None
 

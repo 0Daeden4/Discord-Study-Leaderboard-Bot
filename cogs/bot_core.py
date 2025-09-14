@@ -3,6 +3,7 @@ from discord.ext import commands
 from database_manager import DatabaseManager
 import datetime
 import asyncio
+import smile
 
 
 class BotCore(commands.Cog):
@@ -15,7 +16,6 @@ class BotCore(commands.Cog):
         author = interaction.user
         try:
             await author.send(message_content)
-
             if not isinstance(interaction.channel, DMChannel):
                 await interaction.followup.send("Check your DMs!", ephemeral=True)
 
@@ -37,7 +37,6 @@ class BotCore(commands.Cog):
 
         try:
             await author.send(message_content)
-
             if not isinstance(ctx.channel, DMChannel):
                 await ctx.send("Check your DMs!")
 
@@ -54,10 +53,6 @@ class BotCore(commands.Cog):
         except asyncio.TimeoutError:
             await author.send("Your request timed out.")
 
-    # "1- A lobby cannot be public and encrypted at the same time\n\
-    # 2- A lobby can be private but not encrypted\n\
-    # 3- You need to pass in a strong password for both a private and encrypted lobby\n\
-    # 4- Don't forget the hash of your lobby!")
     @app_commands.command(name="create_lobby", description="Creates a new study lobby.")
     @app_commands.describe(
         name="The name of the lobby.",
@@ -82,17 +77,13 @@ class BotCore(commands.Cog):
             await interaction.followup.send("Creating new lobby...")
 
         hash = ""
-        try:
-            hash = await self.db.create_lobby(user_id=user_id,
-                                              name=name,
-                                              is_public=is_public,
-                                              password=password.content if password is not None else None
-                                              )
-        except Exception as e:
-            print(f"DEBUG: ERROR! An exception occurred: {e}")
-            await interaction.followup.send("An unexpected error has occured...")
+        hash = await self.db.create_lobby(user_id=user_id,
+                                          name=name,
+                                          is_public=is_public,
+                                          password=password.content if password is not None else None
+                                          )
 
-        await interaction.followup.send(f"Lobby '{name}' was created... Don't forget the value below!\nLeaderboard hash: {hash}")
+        await interaction.followup.send(f"Lobby **{name}** was created.\n||Hash: **{hash}**||")
 
     @app_commands.command(name="start_chrono",  description="Starts the chronometer for your studies")
     @app_commands.describe(lobby_hash="Hash value of the lobby. Can be found under 'my lobbies'")
@@ -119,7 +110,7 @@ class BotCore(commands.Cog):
             total_minutes, seconds = divmod(recorded_seconds, 60)
             hours, minutes = divmod(total_minutes, 60)
             await interaction.followup.send(f"Chronometer stopped for lobby: **{lobby_name}**.\n" +
-                                            f"Studied for: **{hours}** Hours, **{minutes}** Minutes and **{seconds}** Seconds.")
+                                            f"Studied for: **{hours}** Hours, **{minutes}** Minutes and **{seconds}** Seconds. {smile.get_positive_comment()}")
         return
 
     @app_commands.command(name="my_lobbies",  description="Lists your lobbies")
@@ -204,7 +195,10 @@ class BotCore(commands.Cog):
             password = message.content
 
         user_id = str(interaction.user.id)
+
+        user_added = False
         user_added = await self.db.join_lobby(lobby_hash, user_id, password)
+
         lobby_name = await self.db.get_lobby_name(lobby_hash)
         if user_added:
             await interaction.followup.send(f"You have joined **{lobby_name}** !\n||Hash: {lobby_hash}||")

@@ -20,7 +20,7 @@ class BotCore(commands.Cog):
                 await interaction.followup.send("Check your DMs!", ephemeral=True)
 
         except Forbidden:
-            await interaction.followup.send("DM could not be sent. Please check your privacy settings.")
+            await interaction.followup.send("DM could not be sent. Please check your privacy settings.", ephemeral=True)
             return
 
         def check(message: Message) -> bool:
@@ -38,10 +38,10 @@ class BotCore(commands.Cog):
         try:
             await author.send(message_content)
             if not isinstance(ctx.channel, DMChannel):
-                await ctx.send("Check your DMs!")
+                await ctx.send("Check your DMs!", ephemeral=True)
 
         except Forbidden:
-            await ctx.send("DM could not be sent. Please check your privacy settings.")
+            await ctx.send("DM could not be sent. Please check your privacy settings.", ephemeral=True)
             return
 
         def check(message: Message) -> bool:
@@ -65,7 +65,7 @@ class BotCore(commands.Cog):
 
         user_has_free_slots = await self.db.user_has_free_slots(user_id)
         if not user_has_free_slots:
-            await interaction.followup.send("You don't have room for a new lobby. Limit of 10 lobbies is reached.")
+            await interaction.followup.send("You don't have room for a new lobby. Limit of 10 lobbies is reached.", ephemeral=True)
             return
 
         password = None
@@ -74,7 +74,7 @@ class BotCore(commands.Cog):
             if password is None or password.content == "":
                 await author.send("Password could not be empty!")
         else:
-            await interaction.followup.send("Creating new lobby...")
+            await interaction.followup.send("Creating new lobby...", ephemeral=True)
 
         hash = ""
         hash = await self.db.create_lobby(user_id=user_id,
@@ -83,7 +83,7 @@ class BotCore(commands.Cog):
                                           password=password.content if password is not None else None
                                           )
 
-        await interaction.followup.send(f"Lobby **{name}** was created.\n||Hash: **{hash}**||")
+        await interaction.followup.send(f"Lobby **{name}** was created.\n||Hash: **{hash}**||", ephemeral=True)
 
     @app_commands.command(name="start_chrono",  description="Starts the chronometer for your studies")
     @app_commands.describe(lobby_hash="Hash value of the lobby. Can be found under 'my lobbies'")
@@ -94,7 +94,7 @@ class BotCore(commands.Cog):
         started_chrono = await self.db.start_chrono(lobby_hash, user_id, dttm)
         lobby_name = await self.db.get_lobby_name(lobby_hash)
         if started_chrono:
-            await interaction.followup.send(f"Chronometer started for lobby: **{lobby_name}**")
+            await interaction.followup.send(f"Chronometer started for lobby: **{lobby_name}**", ephemeral=True)
         return
 
     @app_commands.command(name="stop_chrono",  description="Stops the chronometer for your studies")
@@ -110,7 +110,8 @@ class BotCore(commands.Cog):
             total_minutes, seconds = divmod(recorded_seconds, 60)
             hours, minutes = divmod(total_minutes, 60)
             await interaction.followup.send(f"Chronometer stopped for lobby: **{lobby_name}**.\n" +
-                                            f"Studied for: **{hours}** Hours, **{minutes}** Minutes and **{seconds}** Seconds. {smile.get_positive_comment()}")
+                                            f"Studied for: **{hours}** Hours, **{minutes}** " +
+                                            "Minutes and **{seconds}** Seconds. {smile.get_positive_comment()}", ephemeral=True)
         return
 
     @app_commands.command(name="my_lobbies",  description="Lists your lobbies")
@@ -128,7 +129,7 @@ class BotCore(commands.Cog):
             lobby_name = await self.db.get_lobby_name(lobby_hash)
             out_string += f":gear:Lobby Name: **{lobby_name}**\n:hammer:Lobby Hash: ||**{lobby_hash}**||\n\n"
 
-        await interaction.followup.send(out_string)
+        await interaction.followup.send(out_string, ephemeral=True)
 
     @app_commands.command(name="leaderboard",  description="Displays the leaderboard for the given lobby.")
     @app_commands.describe(lobby_hash="Hash value of the lobby. Can be found under 'my lobbies'")
@@ -180,7 +181,7 @@ class BotCore(commands.Cog):
         lobby_exists = await self.db.check_lobby_all(lobby_hash)
         if not lobby_exists:
             await interaction.followup.send(f"Could not join lobby with hash: **{lobby_hash}** . " +
-                                            "Check if both the hash and password are correct")
+                                            "Check if both the hash and password are correct", ephemeral=True)
             return
 
         # TODO: combine password check in one function
@@ -190,7 +191,7 @@ class BotCore(commands.Cog):
             message = await self._send_await_pm_interaction(interaction, "Enter the password for the lobby you are trying to join.")
             if message is None:
                 await interaction.followup.send(f"Could not join lobby with hash: **{lobby_hash}** . " +
-                                                "Check if both the hash and password are correct")
+                                                "Check if both the hash and password are correct", ephemeral=True)
                 return
             password = message.content
 
@@ -201,10 +202,10 @@ class BotCore(commands.Cog):
 
         lobby_name = await self.db.get_lobby_name(lobby_hash)
         if user_added:
-            await interaction.followup.send(f"You have joined **{lobby_name}** !\n||Hash: {lobby_hash}||")
+            await interaction.followup.send(f"You have joined **{lobby_name}** !\n||Hash: {lobby_hash}||", ephemeral=True)
         else:
             await interaction.followup.send(f"Could not join lobby with hash: **{lobby_hash}** . " +
-                                            "Check if both the hash and password are correct")
+                                            "Check if both the hash and password are correct", ephemeral=True)
 
         return
 

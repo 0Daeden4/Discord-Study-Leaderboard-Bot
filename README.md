@@ -1,3 +1,6 @@
+# Invite Link
+https://discord.com/oauth2/authorize?client_id=1416127534852083902&permissions=549755840512&integration_type=0&scope=bot
+
 # General
 
 With Discord Study Leaderboard Bot (DSLB), you can track you study time inside Discord and compete with your friends.

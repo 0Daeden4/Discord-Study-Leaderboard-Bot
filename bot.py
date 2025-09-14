@@ -5,11 +5,13 @@ from database_manager import DatabaseManager
 
 class Bot(commands.Bot):
 
-    def __init__(self, database: DatabaseManager, **options) -> None:
+    def __init__(self, database: DatabaseManager, testing_guild_id: int, testing: bool = False, **options) -> None:
         intents = discord.Intents.default()
         intents.message_content = True
         super().__init__(command_prefix="]", intents=intents, **options)
         self.db = database
+        self._testing_guild_id = testing_guild_id
+        self._testing = testing
 
     async def on_ready(self):
         print(f"Connected as: {self.user}")
@@ -18,11 +20,12 @@ class Bot(commands.Bot):
         print("Running setup_hook...")
         print("Syncing command tree...")
 
-        TESTING_GUILD_ID = 1022874103759261776
-        self.tree.copy_global_to(guild=discord.Object(id=TESTING_GUILD_ID))
-        await self.tree.sync(guild=discord.Object(id=TESTING_GUILD_ID))
-
-        # await self.tree.sync()
+        if self._testing:
+            self.tree.copy_global_to(
+                guild=discord.Object(id=self._testing_guild_id))
+            await self.tree.sync(guild=discord.Object(id=self._testing_guild_id))
+        else:
+            await self.tree.sync()
 
         print("Command tree synced.")
 

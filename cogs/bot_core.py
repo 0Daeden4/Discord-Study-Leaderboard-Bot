@@ -176,9 +176,9 @@ class BotCore(commands.Cog):
 
         return
 
-    @app_commands.command(name="join",  description="Tries joining a certain lobby.")
+    @app_commands.command(name="join_lobby",  description="Tries joining a certain lobby.")
     @app_commands.describe(lobby_hash="Hash value of the lobby")
-    async def join(self, interaction: Interaction, lobby_hash: str):
+    async def join_lobby(self, interaction: Interaction, lobby_hash: str):
 
         lobby_exists = await self.db.check_lobby_all(lobby_hash)
         if not lobby_exists:

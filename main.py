@@ -12,9 +12,7 @@ async def main(args):
     print("Hello Discord!")
     load_dotenv()
     TOKEN = os.getenv('DISCORD_TOKEN')
-    if TOKEN:
-        asyncio.run(main(TOKEN))
-    else:
+    if TOKEN is None:
         print("Error: DISCORD_TOKEN not found in .env file.")
 
     is_testing = args.testing
@@ -40,4 +38,4 @@ if __name__ == "__main__":
     arg_parser.add_argument("-tgid", "--testing_guild_id", type=int,
                             help="Set the testing guild id for instant command updates.", required=False)
     args = arg_parser.parse_args()
-    main(args)
+    asyncio.run(main(args))

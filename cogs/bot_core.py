@@ -88,19 +88,20 @@ class BotCore(commands.Cog):
     @app_commands.command(name="start_chrono",  description="Starts the chronometer for your studies")
     @app_commands.describe(lobby_hash="Hash value of the lobby. Can be found under 'my lobbies'")
     async def start_chrono(self, interaction: Interaction, lobby_hash: str):
-        await interaction.response.defer()
         user_id = str(interaction.user.id)
         dttm = interaction.created_at
         started_chrono = await self.db.start_chrono(lobby_hash, user_id, dttm)
         lobby_name = await self.db.get_lobby_name(lobby_hash)
         if started_chrono:
-            await interaction.followup.send(f"Chronometer started for lobby: **{lobby_name}**", ephemeral=True)
+            await interaction.response.send_message(f"Chronometer started for lobby: **{lobby_name}**", ephemeral=True)
+        else:
+            await interaction.response.send_message("Could not start chronometer. You are either not included in" +
+                                                    " the lobby or the chronometer is already running.", ephemeral=True)
         return
 
     @app_commands.command(name="stop_chrono",  description="Stops the chronometer for your studies")
     @app_commands.describe(lobby_hash="Hash value of the lobby. Can be found under 'my lobbies'")
     async def stop_chrono(self, interaction: Interaction, lobby_hash: str):
-        await interaction.response.defer()
         user_id = str(interaction.user.id)
         dttm = interaction.created_at
         stopped_chrono, recorded_seconds = await self.db.stop_chrono(lobby_hash, user_id, dttm)
@@ -109,19 +110,21 @@ class BotCore(commands.Cog):
 
             total_minutes, seconds = divmod(recorded_seconds, 60)
             hours, minutes = divmod(total_minutes, 60)
-            await interaction.followup.send(f"Chronometer stopped for lobby: **{lobby_name}**.\n" +
-                                            f"Studied for: **{hours}** Hours, **{minutes}** " +
-                                            f"Minutes and **{seconds}** Seconds. {smile.get_positive_comment()}", ephemeral=True)
+            await interaction.response.send_message(f"Chronometer stopped for lobby: **{lobby_name}**.\n" +
+                                                    f"Studied for: **{hours}** Hours, **{minutes}** " +
+                                                    f"Minutes and **{seconds}** Seconds. {smile.get_positive_comment()}", ephemeral=True)
+        else:
+            await interaction.response.send_message("Could not stop chronometer. You are either not included in" +
+                                                    " the lobby or the chronometer is already not running.", ephemeral=True)
         return
 
     @app_commands.command(name="my_lobbies",  description="Lists your lobbies")
     async def my_lobbies(self, interaction: Interaction):
-        await interaction.response.defer()
         user_id = str(interaction.user.id)
         user_lobby_hashes = await self.db.get_user_lobbies(user_id)
         out_string = ""
         if user_lobby_hashes is None or user_lobby_hashes == []:
-            await interaction.followup.send("You are not in any lobbies yet!")
+            await interaction.response.send_message("You are not in any lobbies yet!", ephemeral=True)
             return
 
         for lobby_hash in user_lobby_hashes:
@@ -129,7 +132,7 @@ class BotCore(commands.Cog):
             lobby_name = await self.db.get_lobby_name(lobby_hash)
             out_string += f":gear:Lobby Name: **{lobby_name}**\n:hammer:Lobby Hash: ||**{lobby_hash}**||\n\n"
 
-        await interaction.followup.send(out_string, ephemeral=True)
+        await interaction.response.send_message(out_string, ephemeral=True)
 
     @app_commands.command(name="leaderboard",  description="Displays the leaderboard for the given lobby.")
     @app_commands.describe(lobby_hash="Hash value of the lobby. Can be found under 'my lobbies'")
@@ -176,12 +179,11 @@ class BotCore(commands.Cog):
     @app_commands.command(name="join",  description="Tries joining a certain lobby.")
     @app_commands.describe(lobby_hash="Hash value of the lobby")
     async def join(self, interaction: Interaction, lobby_hash: str):
-        await interaction.response.defer()
 
         lobby_exists = await self.db.check_lobby_all(lobby_hash)
         if not lobby_exists:
-            await interaction.followup.send(f"Could not join lobby with hash: **{lobby_hash}** . " +
-                                            "Check if both the hash and password are correct", ephemeral=True)
+            await interaction.response.send_message(f"Could not join lobby with hash: **{lobby_hash}** . " +
+                                                    "Check if both the hash and password are correct", ephemeral=True)
             return
 
         # TODO: combine password check in one function
@@ -190,8 +192,8 @@ class BotCore(commands.Cog):
         if not is_public:
             message = await self._send_await_pm_interaction(interaction, "Enter the password for the lobby you are trying to join.")
             if message is None:
-                await interaction.followup.send(f"Could not join lobby with hash: **{lobby_hash}** . " +
-                                                "Check if both the hash and password are correct", ephemeral=True)
+                await interaction.response.send_message(f"Could not join lobby with hash: **{lobby_hash}** . " +
+                                                        "Check if both the hash and password are correct", ephemeral=True)
                 return
             password = message.content
 
@@ -202,10 +204,10 @@ class BotCore(commands.Cog):
 
         lobby_name = await self.db.get_lobby_name(lobby_hash)
         if user_added:
-            await interaction.followup.send(f"You have joined **{lobby_name}** !\n||Hash: {lobby_hash}||", ephemeral=True)
+            await interaction.response.send_message(f"You have joined **{lobby_name}** !\n||Hash: {lobby_hash}||", ephemeral=True)
         else:
-            await interaction.followup.send(f"Could not join lobby with hash: **{lobby_hash}** . " +
-                                            "Check if both the hash and password are correct", ephemeral=True)
+            await interaction.response.send_message(f"Could not join lobby with hash: **{lobby_hash}** . " +
+                                                    "Check if both the hash and password are correct", ephemeral=True)
 
         return
 

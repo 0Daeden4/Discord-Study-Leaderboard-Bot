@@ -3,7 +3,7 @@ from random import choice
 positive_comments: list[str] = [
     "Well done!",
     "Keep up the good work!",
-    "That's a fantastic!",
+    "That's fantastic!",
     "Impressive!",
     "I knew you could do it!",
     "What a sight!",

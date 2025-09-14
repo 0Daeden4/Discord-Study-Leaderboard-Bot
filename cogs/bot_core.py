@@ -111,7 +111,7 @@ class BotCore(commands.Cog):
             hours, minutes = divmod(total_minutes, 60)
             await interaction.followup.send(f"Chronometer stopped for lobby: **{lobby_name}**.\n" +
                                             f"Studied for: **{hours}** Hours, **{minutes}** " +
-                                            "Minutes and **{seconds}** Seconds. {smile.get_positive_comment()}", ephemeral=True)
+                                            f"Minutes and **{seconds}** Seconds. {smile.get_positive_comment()}", ephemeral=True)
         return
 
     @app_commands.command(name="my_lobbies",  description="Lists your lobbies")

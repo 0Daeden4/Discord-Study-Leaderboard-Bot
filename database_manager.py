@@ -1,9 +1,9 @@
-import aiosqlite
-from typing import List, Dict, Any, Optional
-from security_manager import SecurityManager
-import os
-import datetime
 import enum
+import datetime
+import os
+from security_manager import SecurityManager
+from typing import List, Dict, Any, Optional
+import aiosqlite
 
 
 class DatabaseEnums(enum.IntEnum):
@@ -70,7 +70,7 @@ class DatabaseManager:
         password_hash = self._security.hash_password(
             password) if password else None
 
-        lobby_already_exists = self._check_lobby_all(name)
+        lobby_already_exists = await self._check_lobby_all(name)
         if lobby_already_exists:
             return DatabaseEnums.LOBBY_EXISTS
 
@@ -95,25 +95,37 @@ class DatabaseManager:
                 ''')
 
             await db.commit()
-            await self.add_user_to_lobby(lobby_hash, "admin", user_id, is_admin=True)
+            await self.add_user_to_lobby(name, "admin", user_id, is_admin=True)
 
         print(f"Successfully created lobby '{name}' with hash: {lobby_hash}")
         return DatabaseEnums.SUCCESS
 
-    async def _lobby_table_exists(self, lobby_name: str) -> bool:
-        lobby_hash = self._security.generate_lobby_hash(lobby_name)
+    async def _lobby_table_exists(self, lobby_name: str, lobby_hash: str | None = None) -> bool:
+        if lobby_hash is None:
+            lobby_hash = self._security.generate_lobby_hash(lobby_name)
         table_name = f"lobby_{lobby_hash}"
         async with aiosqlite.connect(self.DB_FILE) as db:
             cursor = await db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table_name,))
             result = await cursor.fetchone()
             return result is not None
 
-    async def _lobby_exists(self, lobby_name: str) -> bool:
-        lobby_hash = self._security.generate_lobby_hash(lobby_name)
+    async def _lobby_exists(self, lobby_name: str, lobby_hash: str | None = None) -> bool:
+        if lobby_hash is None:
+            lobby_hash = self._security.generate_lobby_hash(lobby_name)
         async with aiosqlite.connect(self.DB_FILE) as db:
             cursor = await db.execute("SELECT 1 FROM Lobbies WHERE hash=?", (lobby_hash,))
             result = await cursor.fetchone()
             return result is not None
+
+    async def _check_lobby_all(self, lobby_name: str, lobby_hash: str | None = None) -> bool:
+        '''
+        Use lobby_hash optionally
+        '''
+        if lobby_hash is None:
+            lobby_hash = self._security.generate_lobby_hash(lobby_name)
+        lobby_exists = await self._lobby_exists(lobby_name, lobby_hash)
+        lobby_table_exists = await self._lobby_table_exists(lobby_name, lobby_hash)
+        return lobby_exists and lobby_table_exists
 
     async def is_public(self, lobby_name: str) -> bool:
         lobby_hash = self._security.generate_lobby_hash(lobby_name)
@@ -151,8 +163,8 @@ class DatabaseManager:
         Returns INSUFFICIENT_PRIVILAGES, USER_HAS_NO_FREE_SLOTS, SUCCESS, USER_ALREADY_EXISTS_IN_LOBBY
         '''
         lobby_hash = self._security.generate_lobby_hash(lobby_name)
-        is_adder_admin = await self.is_admin(user_id_adder, lobby_hash)
-        is_lobby_public = await self.is_public(lobby_hash)
+        is_adder_admin = await self.is_admin(user_id_adder, lobby_name)
+        is_lobby_public = await self.is_public(lobby_name)
         if not is_adder_admin and not is_lobby_public:
             return DatabaseEnums.INSUFFICIENT_PRIVILAGES
 
@@ -166,7 +178,7 @@ class DatabaseManager:
 
             if not result:
                 user_has_empty_slots = await self._add_lobby_to_user_table(
-                    user_id_to_add, lobby_hash)
+                    user_id_to_add, lobby_name)
                 if not user_has_empty_slots:
                     return DatabaseEnums.USER_HAS_NO_FREE_SLOTS
                 insert_query = f'INSERT INTO "{table_name}" (user_id, is_admin, is_running, last_entry) VALUES (?, ?, ?, ?)'
@@ -179,34 +191,23 @@ class DatabaseManager:
                     f"User {user_id_to_add} already exists in lobby {lobby_hash}")
                 return DatabaseEnums.USER_ALREADY_EXISTS_IN_LOBBY
 
-    async def _check_lobby_all(self, lobby_name: str, lobby_hash: str | None = None) -> bool:
-        '''
-        Use lobby_hash optionally
-        '''
-        if lobby_hash is None:
-            lobby_hash = self._security.generate_lobby_hash(lobby_name)
-        lobby_exists = await self._lobby_exists(lobby_hash)
-        lobby_table_exists = await self._lobby_table_exists(lobby_hash)
-        return lobby_exists and lobby_table_exists
-
     async def join_lobby(self, lobby_name: str, user_id: str, password: str | None) -> int:
         '''
         Returns USER_HAS_NO_FREE_SLOTS, SUCCESS, USER_ALREADY_EXISTS_IN_LOBBY, INVALID_PASSWORD, INVALID_LOBBY
         '''
-        lobby_hash = self._security.generate_lobby_hash(lobby_name)
         user_has_free_slots = await self.user_has_free_slots(user_id)
         if not user_has_free_slots:
             return DatabaseEnums.USER_HAS_NO_FREE_SLOTS
 
-        lobby_exists = await self._check_lobby_all(lobby_hash)
+        lobby_exists = await self._check_lobby_all(lobby_name)
         if not lobby_exists:
             return DatabaseEnums.INVALID_LOBBY
 
-        lobby_is_public = await self.is_public(lobby_hash)
+        lobby_is_public = await self.is_public(lobby_name)
         if not lobby_is_public and password is None:
             return DatabaseEnums.INVALID_PASSWORD
         elif not lobby_is_public:
-            lobby_password_hash = await self._get_lobby_password_hash(lobby_hash)
+            lobby_password_hash = await self._get_lobby_password_hash(lobby_name)
             if lobby_password_hash is None:
                 print("This should not happen. Password hash for private lobby is None.")
                 return DatabaseEnums.UNWANTED_BEHAVIOR
@@ -217,9 +218,9 @@ class DatabaseManager:
             if not passwords_correct:
                 return DatabaseEnums.INVALID_PASSWORD
 
-        user_added = await self.add_user_to_lobby(lobby_hash, "admin", user_id)
+        user_added = await self.add_user_to_lobby(lobby_name, "admin", user_id)
 
-        return DatabaseEnums.SUCCESS
+        return user_added
 
     async def remove_user_from_lobby(self, lobby_name: str, user_id_remover: str, user_id_to_remove: str) -> int:
         '''
@@ -230,7 +231,7 @@ class DatabaseManager:
             return DatabaseEnums.INVALID_LOBBY
 
         lobby_hash = self._security.generate_lobby_hash(lobby_name)
-        is_remover_admin = await self.is_admin(user_id_remover, lobby_hash)
+        is_remover_admin = await self.is_admin(user_id_remover, lobby_name)
         if not is_remover_admin:
             return DatabaseEnums.INSUFFICIENT_PRIVILAGES
 
@@ -239,7 +240,7 @@ class DatabaseManager:
 
         async with aiosqlite.connect(self.DB_FILE) as db:
             removed_lobby_from_user = await self._remove_lobby_from_user_table(
-                user_id_to_remove, lobby_hash)
+                user_id_to_remove, lobby_name)
 
             if not removed_lobby_from_user:
                 return DatabaseEnums.USER_NOT_IN_LOBBY
@@ -270,7 +271,7 @@ class DatabaseManager:
 
     async def _get_lobby_password_hash(self, lobby_name: str) -> Optional[str]:
         lobby_hash = self._security.generate_lobby_hash(lobby_name)
-        lobby_exists = await self._check_lobby_all(lobby_hash)
+        lobby_exists = await self._check_lobby_all(lobby_name)
         if not lobby_exists:
             return None
         async with aiosqlite.connect(self.DB_FILE) as db:
@@ -286,7 +287,7 @@ class DatabaseManager:
         if not lobby_exists:
             return DatabaseEnums.INVALID_LOBBY
         lobby_hash = self._security.generate_lobby_hash(lobby_name)
-        is_dropper_admin = await self.is_admin(user_id_dropper, lobby_hash)
+        is_dropper_admin = await self.is_admin(user_id_dropper, lobby_name)
         if not is_dropper_admin:
             print(
                 f"User {user_id_dropper} does not have the required privilages to drop the lobby.")
@@ -304,7 +305,7 @@ class DatabaseManager:
     async def get_lobby_users(self, lobby_name: str) -> List[Dict[str, Any]]:
         lobby_hash = self._security.generate_lobby_hash(lobby_name)
 
-        lobby_exists = await self._check_lobby_all(lobby_hash)
+        lobby_exists = await self._check_lobby_all(lobby_name)
         if not lobby_exists:
             return []
 
@@ -411,9 +412,9 @@ class DatabaseManager:
         Returns SUCCESS, INVALID_LOBBY, USER_NOT_IN_LOBBY, CHRONO_ALREADY_RUNNING
         '''
         lobby_hash = self._security.generate_lobby_hash(lobby_name)
-        if not await self._lobby_exists(lobby_hash):
+        if not await self._lobby_exists(lobby_name):
             return DatabaseEnums.INVALID_LOBBY
-        elif not await self._is_in_lobby(user_id, lobby_hash):
+        elif not await self._is_in_lobby(user_id, lobby_name):
             return DatabaseEnums.USER_NOT_IN_LOBBY
 
         table_name = f"lobby_{lobby_hash}"
@@ -435,9 +436,9 @@ class DatabaseManager:
         Returns SUCCESS, INVALID_LOBBY, USER_NOT_IN_LOBBY, CHRONO_ALREADY_NOT_RUNNING
         '''
         lobby_hash = self._security.generate_lobby_hash(lobby_name)
-        if not await self._lobby_exists(lobby_hash):
+        if not await self._lobby_exists(lobby_name):
             return (DatabaseEnums.INVALID_LOBBY, 0)
-        elif not await self._is_in_lobby(user_id, lobby_hash):
+        elif not await self._is_in_lobby(user_id, lobby_name):
             return (DatabaseEnums.USER_NOT_IN_LOBBY, 0)
 
         table_name = f"lobby_{lobby_hash}"

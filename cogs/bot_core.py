@@ -75,6 +75,7 @@ class BotCore(commands.Cog):
                                             is_public=is_public,
                                             password=password.content if password is not None else None
                                             )
+
         match result:
             case DatabaseEnums.PASSWORD_NOT_ENTERED:
                 await interaction.followup.send("Password not entered for private lobby! Lobby could not be created!", ephemeral=True)

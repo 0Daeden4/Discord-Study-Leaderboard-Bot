@@ -14,9 +14,8 @@ class SecurityManager:
         """
         Creates a hash for a lobby ID.
         """
-        salt = os.urandom(16)
         hasher = hashlib.sha256()
-        hasher.update(salt + lobby_name.encode('utf-8'))
+        hasher.update(lobby_name.encode('utf-8'))
         return hasher.hexdigest()
 
     @staticmethod

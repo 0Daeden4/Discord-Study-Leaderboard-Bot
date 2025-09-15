@@ -88,7 +88,7 @@ class BotCore(commands.Cog):
                 await interaction.followup.send(f"Something unexpected happened.", ephemeral=True)
 
     @app_commands.command(name="start_chrono",  description="Starts the chronometer for your studies")
-    @app_commands.describe(lobby_hash="Hash value of the lobby. Can be found under 'my lobbies'")
+    @app_commands.describe(lobby_name="Hash value of the lobby. Can be found under 'my lobbies'")
     async def start_chrono(self, interaction: Interaction, lobby_name: str):
         user_id = str(interaction.user.id)
         dttm = interaction.created_at
@@ -106,7 +106,7 @@ class BotCore(commands.Cog):
                 await interaction.response.send_message(f"Something unexpected happened.", ephemeral=True)
 
     @app_commands.command(name="stop_chrono",  description="Stops the chronometer for your studies")
-    @app_commands.describe(lobby_hash="Hash value of the lobby. Can be found under 'my lobbies'")
+    @app_commands.describe(lobby_name="Hash value of the lobby. Can be found under 'my lobbies'")
     async def stop_chrono(self, interaction: Interaction, lobby_name: str):
         user_id = str(interaction.user.id)
         dttm = interaction.created_at
@@ -139,12 +139,12 @@ class BotCore(commands.Cog):
         for lobby_hash in user_lobby_hashes:
             print(lobby_hash)
             lobby_name = await self.db._get_lobby_name(lobby_hash)
-            out_string += f":gear:Lobby Name: **{lobby_name}**\n:hammer:Lobby Hash: ||**{lobby_hash}**||\n\n"
+            out_string += f":gear::hammer: Lobby Name: **{lobby_name}**\n\n"
 
         await interaction.response.send_message(out_string, ephemeral=True)
 
     @app_commands.command(name="leaderboard",  description="Displays the leaderboard for the given lobby.")
-    @app_commands.describe(lobby_hash="Hash value of the lobby. Can be found under 'my lobbies'")
+    @app_commands.describe(lobby_name="Hash value of the lobby. Can be found under 'my lobbies'")
     async def leaderboard(self, interaction: Interaction, lobby_name: str):
         await interaction.response.defer()
         user_id = str(interaction.user.id)
@@ -183,7 +183,7 @@ class BotCore(commands.Cog):
         await interaction.followup.send(embed=embed)
 
     @app_commands.command(name="join_lobby",  description="Tries joining a certain lobby.")
-    @app_commands.describe(lobby_hash="Hash value of the lobby")
+    @app_commands.describe(lobby_name="Hash value of the lobby")
     async def join_lobby(self, interaction: Interaction, lobby_name: str):
 
         # TODO: combine password check in one function

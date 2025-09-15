@@ -137,7 +137,6 @@ class BotCore(commands.Cog):
             return
 
         for lobby_hash in user_lobby_hashes:
-            print(lobby_hash)
             lobby_name = await self.db._get_lobby_name(lobby_hash)
             out_string += f":gear::hammer: Lobby Name: **{lobby_name}**\n\n"
 

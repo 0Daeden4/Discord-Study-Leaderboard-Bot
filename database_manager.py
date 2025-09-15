@@ -179,8 +179,12 @@ class DatabaseManager:
                     f"User {user_id_to_add} already exists in lobby {lobby_hash}")
                 return DatabaseEnums.USER_ALREADY_EXISTS_IN_LOBBY
 
-    async def _check_lobby_all(self, lobby_name: str) -> bool:
-        lobby_hash = self._security.generate_lobby_hash(lobby_name)
+    async def _check_lobby_all(self, lobby_name: str, lobby_hash: str | None = None) -> bool:
+        '''
+        Use lobby_hash optionally
+        '''
+        if lobby_hash is None:
+            lobby_hash = self._security.generate_lobby_hash(lobby_name)
         lobby_exists = await self._lobby_exists(lobby_hash)
         lobby_table_exists = await self._lobby_table_exists(lobby_hash)
         return lobby_exists and lobby_table_exists
@@ -253,10 +257,9 @@ class DatabaseManager:
                     f"User {user_id_to_remove} not found in lobby {lobby_hash}")
                 return DatabaseEnums.USER_NOT_IN_LOBBY
 
-    async def _get_lobby_name(self, lobby_name: str) -> Optional[str]:
-        lobby_hash = self._security.generate_lobby_hash(lobby_name)
+    async def _get_lobby_name(self, lobby_hash: str) -> Optional[str]:
 
-        lobby_exists = await self._check_lobby_all(lobby_hash)
+        lobby_exists = await self._check_lobby_all(lobby_name="", lobby_hash=lobby_hash)
         if not lobby_exists:
             return None
 

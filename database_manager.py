@@ -3,6 +3,22 @@ from typing import List, Dict, Any, Optional
 from security_manager import SecurityManager
 import os
 import datetime
+import enum
+
+
+class DatabaseEnums(enum.IntEnum):
+    UNWANTED_BEHAVIOR = 0
+    SUCCESS = 1
+    LOBBY_EXISTS = 32
+    INVALID_PASSWORD = 33
+    PASSWORD_NOT_ENTERED = 34
+    INSUFFICIENT_PRIVILAGES = 35
+    USER_HAS_NO_FREE_SLOTS = 36
+    USER_ALREADY_EXISTS_IN_LOBBY = 36
+    USER_NOT_IN_LOBBY = 37
+    INVALID_LOBBY = 38
+    CHRONO_ALREADY_RUNNING = 39
+    CHRONO_ALREADY_NOT_RUNNING = 40
 
 
 class DatabaseManager:
@@ -40,14 +56,25 @@ class DatabaseManager:
             await db.commit()
             print("Database initialized.")
 
-    async def create_lobby(self, user_id: str, name: str, is_public: bool = False, password: Optional[str] = None) -> str:
-        if not is_public and not password:
-            raise ValueError("A private lobby must have a password.")
+    async def create_lobby(self, user_id: str, name: str, is_public: bool = False, password: Optional[str] = None) -> int:
+        '''
+        Returns PASSWORD_NOT_ENTERED, USER_HAS_NO_FREE_SLOTS, SUCCESS, LOBBY_EXISTS
+        '''
+        user_has_free_slots = await self.user_has_free_slots(user_id)
+        if not user_has_free_slots:
+            return DatabaseEnums.USER_HAS_NO_FREE_SLOTS
 
-        lobby_hash = self._security.generate_lobby_hash(name)
+        if not is_public and not password:
+            return DatabaseEnums.PASSWORD_NOT_ENTERED
+
         password_hash = self._security.hash_password(
             password) if password else None
 
+        lobby_already_exists = self._check_lobby_all(name)
+        if lobby_already_exists:
+            return DatabaseEnums.LOBBY_EXISTS
+
+        lobby_hash = self._security.generate_lobby_hash(name)
         table_name = f"lobby_{lobby_hash}"
 
         async with aiosqlite.connect(self.DB_FILE) as db:
@@ -71,30 +98,34 @@ class DatabaseManager:
             await self.add_user_to_lobby(lobby_hash, "admin", user_id, is_admin=True)
 
         print(f"Successfully created lobby '{name}' with hash: {lobby_hash}")
-        return lobby_hash
+        return DatabaseEnums.SUCCESS
 
-    async def _lobby_table_exists(self, lobby_hash: str) -> bool:
+    async def _lobby_table_exists(self, lobby_name: str) -> bool:
+        lobby_hash = self._security.generate_lobby_hash(lobby_name)
         table_name = f"lobby_{lobby_hash}"
         async with aiosqlite.connect(self.DB_FILE) as db:
             cursor = await db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table_name,))
             result = await cursor.fetchone()
             return result is not None
 
-    async def _lobby_exists(self, lobby_hash: str) -> bool:
+    async def _lobby_exists(self, lobby_name: str) -> bool:
+        lobby_hash = self._security.generate_lobby_hash(lobby_name)
         async with aiosqlite.connect(self.DB_FILE) as db:
             cursor = await db.execute("SELECT 1 FROM Lobbies WHERE hash=?", (lobby_hash,))
             result = await cursor.fetchone()
             return result is not None
 
-    async def is_public(self, lobby_hash: str) -> bool:
-        if not await self._lobby_exists(lobby_hash):
+    async def is_public(self, lobby_name: str) -> bool:
+        lobby_hash = self._security.generate_lobby_hash(lobby_name)
+        if not await self._check_lobby_all(lobby_hash):
             return False
         async with aiosqlite.connect(self.DB_FILE) as db:
             cursor = await db.execute("SELECT is_public FROM Lobbies WHERE hash=?", (lobby_hash,))
             result = await cursor.fetchone()
             return bool(result[0]) if result else False
 
-    async def is_admin(self, user_id: str, lobby_hash: str) -> bool:
+    async def is_admin(self, user_id: str, lobby_name: str) -> bool:
+        lobby_hash = self._security.generate_lobby_hash(lobby_name)
         if user_id == "admin":
             return True
 
@@ -107,19 +138,23 @@ class DatabaseManager:
             return bool(result[0]) if result else False
 
     async def user_has_free_slots(self, user_id: str) -> bool:
-        user_has_room = await self.add_lobby_to_user_table(user_id, "temporary")
+        user_has_room = await self._add_lobby_to_user_table(user_id, "temporary")
 
         if not user_has_room:
             return False
         else:
-            await self.remove_lobby_from_user_table(user_id, "temporary")
+            await self._remove_lobby_from_user_table(user_id, "temporary")
             return True
 
-    async def add_user_to_lobby(self, lobby_hash: str, user_id_adder: str, user_id_to_add: str, is_admin: bool = False) -> bool:
+    async def add_user_to_lobby(self, lobby_name: str, user_id_adder: str, user_id_to_add: str, is_admin: bool = False) -> int:
+        '''
+        Returns INSUFFICIENT_PRIVILAGES, USER_HAS_NO_FREE_SLOTS, SUCCESS, USER_ALREADY_EXISTS_IN_LOBBY
+        '''
+        lobby_hash = self._security.generate_lobby_hash(lobby_name)
         is_adder_admin = await self.is_admin(user_id_adder, lobby_hash)
         is_lobby_public = await self.is_public(lobby_hash)
         if not is_adder_admin and not is_lobby_public:
-            return False
+            return DatabaseEnums.INSUFFICIENT_PRIVILAGES
 
         table_name = f"lobby_{lobby_hash}"
         effective_user_id = user_id_to_add
@@ -130,68 +165,80 @@ class DatabaseManager:
             result = await cursor.fetchone()
 
             if not result:
-                user_has_empty_slots = await self.add_lobby_to_user_table(
+                user_has_empty_slots = await self._add_lobby_to_user_table(
                     user_id_to_add, lobby_hash)
                 if not user_has_empty_slots:
-                    return False
+                    return DatabaseEnums.USER_HAS_NO_FREE_SLOTS
                 insert_query = f'INSERT INTO "{table_name}" (user_id, is_admin, is_running, last_entry) VALUES (?, ?, ?, ?)'
                 await db.execute(insert_query, (effective_user_id, is_admin, False, None))
                 await db.commit()
                 print(f"Added user {user_id_to_add} to lobby {lobby_hash}")
-                return True
+                return DatabaseEnums.SUCCESS
             else:
                 print(
                     f"User {user_id_to_add} already exists in lobby {lobby_hash}")
-                return False
+                return DatabaseEnums.USER_ALREADY_EXISTS_IN_LOBBY
 
-    async def check_lobby_all(self, lobby_hash: str) -> bool:
+    async def _check_lobby_all(self, lobby_name: str) -> bool:
+        lobby_hash = self._security.generate_lobby_hash(lobby_name)
         lobby_exists = await self._lobby_exists(lobby_hash)
         lobby_table_exists = await self._lobby_table_exists(lobby_hash)
         return lobby_exists and lobby_table_exists
 
-    async def join_lobby(self, lobby_hash: str, user_id: str, password: str | None) -> bool:
+    async def join_lobby(self, lobby_name: str, user_id: str, password: str | None) -> int:
+        '''
+        Returns USER_HAS_NO_FREE_SLOTS, SUCCESS, USER_ALREADY_EXISTS_IN_LOBBY, INVALID_PASSWORD, INVALID_LOBBY
+        '''
+        lobby_hash = self._security.generate_lobby_hash(lobby_name)
         user_has_free_slots = await self.user_has_free_slots(user_id)
         if not user_has_free_slots:
-            return False
+            return DatabaseEnums.USER_HAS_NO_FREE_SLOTS
 
-        lobby_exists = await self.check_lobby_all(lobby_hash)
+        lobby_exists = await self._check_lobby_all(lobby_hash)
         if not lobby_exists:
-            return False
+            return DatabaseEnums.INVALID_LOBBY
 
         lobby_is_public = await self.is_public(lobby_hash)
         if not lobby_is_public and password is None:
-            return False
+            return DatabaseEnums.INVALID_PASSWORD
         elif not lobby_is_public:
-            lobby_password_hash = await self.get_lobby_password_hash(lobby_hash)
+            lobby_password_hash = await self._get_lobby_password_hash(lobby_hash)
             if lobby_password_hash is None:
                 print("This should not happen. Password hash for private lobby is None.")
-                return False
+                return DatabaseEnums.UNWANTED_BEHAVIOR
             # TODO make prettier
             assert (password is not None)
             passwords_correct = self._security.check_password(
                 password, lobby_password_hash)
             if not passwords_correct:
-                return False
+                return DatabaseEnums.INVALID_PASSWORD
 
         user_added = await self.add_user_to_lobby(lobby_hash, "admin", user_id)
 
-        return user_added
+        return DatabaseEnums.SUCCESS
 
-    async def remove_user_from_lobby(self, lobby_hash: str, user_id_remover: str, user_id_to_remove: str, password: Optional[str] = None) -> bool:
+    async def remove_user_from_lobby(self, lobby_name: str, user_id_remover: str, user_id_to_remove: str) -> int:
+        '''
+        Returns INSUFFICIENT_PRIVILAGES, SUCCESS, USER_NOT_IN_LOBBY , INVALID_LOBBY
+        '''
+        lobby_exists = await self._check_lobby_all(lobby_name)
+        if not lobby_exists:
+            return DatabaseEnums.INVALID_LOBBY
 
+        lobby_hash = self._security.generate_lobby_hash(lobby_name)
         is_remover_admin = await self.is_admin(user_id_remover, lobby_hash)
         if not is_remover_admin:
-            return False
+            return DatabaseEnums.INSUFFICIENT_PRIVILAGES
 
         table_name = f"lobby_{lobby_hash}"
         effective_user_id = user_id_to_remove
 
         async with aiosqlite.connect(self.DB_FILE) as db:
-            removed_lobby_from_user = await self.remove_lobby_from_user_table(
+            removed_lobby_from_user = await self._remove_lobby_from_user_table(
                 user_id_to_remove, lobby_hash)
 
             if not removed_lobby_from_user:
-                return False
+                return DatabaseEnums.USER_NOT_IN_LOBBY
 
             delete_query = f'DELETE FROM "{table_name}" WHERE user_id = ?'
             cursor = await db.execute(delete_query, (effective_user_id,))
@@ -200,15 +247,16 @@ class DatabaseManager:
             if cursor.rowcount > 0:
                 print(
                     f"Successfully removed user {user_id_to_remove} from lobby {lobby_hash}")
-                return True
+                return DatabaseEnums.SUCCESS
             else:
                 print(
                     f"User {user_id_to_remove} not found in lobby {lobby_hash}")
-                return False
+                return DatabaseEnums.USER_NOT_IN_LOBBY
 
-    async def get_lobby_name(self, lobby_hash: str) -> Optional[str]:
+    async def _get_lobby_name(self, lobby_name: str) -> Optional[str]:
+        lobby_hash = self._security.generate_lobby_hash(lobby_name)
 
-        lobby_exists = await self.check_lobby_all(lobby_hash)
+        lobby_exists = await self._check_lobby_all(lobby_hash)
         if not lobby_exists:
             return None
 
@@ -217,8 +265,9 @@ class DatabaseManager:
             result = await cursor.fetchone()
             return result[0] if result else None
 
-    async def get_lobby_password_hash(self, lobby_hash: str) -> Optional[str]:
-        lobby_exists = await self.check_lobby_all(lobby_hash)
+    async def _get_lobby_password_hash(self, lobby_name: str) -> Optional[str]:
+        lobby_hash = self._security.generate_lobby_hash(lobby_name)
+        lobby_exists = await self._check_lobby_all(lobby_hash)
         if not lobby_exists:
             return None
         async with aiosqlite.connect(self.DB_FILE) as db:
@@ -226,12 +275,19 @@ class DatabaseManager:
             result = await cursor.fetchone()
             return result[0] if result else None
 
-    async def delete_lobby(self, user_id_dropper: str, lobby_hash: str, password: Optional[str] = None):
+    async def delete_lobby(self, user_id_dropper: str, lobby_name: str) -> int:
+        '''
+        Returns INSUFFICIENT_PRIVILAGES, SUCCESS, INVALID_LOBBY
+        '''
+        lobby_exists = await self._check_lobby_all(lobby_name)
+        if not lobby_exists:
+            return DatabaseEnums.INVALID_LOBBY
+        lobby_hash = self._security.generate_lobby_hash(lobby_name)
         is_dropper_admin = await self.is_admin(user_id_dropper, lobby_hash)
         if not is_dropper_admin:
             print(
                 f"User {user_id_dropper} does not have the required privilages to drop the lobby.")
-            return
+            return DatabaseEnums.INSUFFICIENT_PRIVILAGES
 
         table_name = f"lobby_{lobby_hash}"
         async with aiosqlite.connect(self.DB_FILE) as db:
@@ -240,10 +296,12 @@ class DatabaseManager:
             await db.execute(drop_query)
             await db.commit()
             print(f"Successfully deleted lobby with hash: {lobby_hash}")
+            return DatabaseEnums.SUCCESS
 
-    async def get_lobby_users(self, lobby_hash: str) -> List[Dict[str, Any]]:
+    async def get_lobby_users(self, lobby_name: str) -> List[Dict[str, Any]]:
+        lobby_hash = self._security.generate_lobby_hash(lobby_name)
 
-        lobby_exists = await self.check_lobby_all(lobby_hash)
+        lobby_exists = await self._check_lobby_all(lobby_hash)
         if not lobby_exists:
             return []
 
@@ -257,13 +315,14 @@ class DatabaseManager:
 
             return list(entries)
 
-    async def register_user_if_not_exists(self, user_id: str):
+    async def _register_user_if_not_exists(self, user_id: str):
         async with aiosqlite.connect(self.DB_FILE) as db:
             await db.execute("INSERT OR IGNORE INTO Users (user_id) VALUES (?)", (user_id,))
             await db.commit()
 
-    async def add_lobby_to_user_table(self, user_id: str, lobby_hash: str) -> bool:
-        await self.register_user_if_not_exists(user_id)
+    async def _add_lobby_to_user_table(self, user_id: str, lobby_name: str) -> bool:
+        lobby_hash = self._security.generate_lobby_hash(lobby_name)
+        await self._register_user_if_not_exists(user_id)
 
         async with aiosqlite.connect(self.DB_FILE) as db:
             db.row_factory = aiosqlite.Row
@@ -290,7 +349,8 @@ class DatabaseManager:
                     return False
         return False
 
-    async def remove_lobby_from_user_table(self, user_id: str, lobby_hash: str) -> bool:
+    async def _remove_lobby_from_user_table(self, user_id: str, lobby_name: str) -> bool:
+        lobby_hash = self._security.generate_lobby_hash(lobby_name)
         async with aiosqlite.connect(self.DB_FILE) as db:
             db.row_factory = aiosqlite.Row
             cursor = await db.execute("SELECT * FROM Users WHERE user_id = ?", (user_id,))
@@ -318,7 +378,7 @@ class DatabaseManager:
         return False
 
     async def get_user_lobbies(self, user_id: str) -> List[str]:
-        await self.register_user_if_not_exists(user_id)
+        await self._register_user_if_not_exists(user_id)
 
         async with aiosqlite.connect(self.DB_FILE) as db:
             db.row_factory = aiosqlite.Row
@@ -334,7 +394,8 @@ class DatabaseManager:
                         lobbies.append(lobby_hash)
             return lobbies
 
-    async def is_in_lobby(self, user_id: str, lobby_hash: str) -> bool:
+    async def _is_in_lobby(self, user_id: str, lobby_name: str) -> bool:
+        lobby_hash = self._security.generate_lobby_hash(lobby_name)
         table_name = f"lobby_{lobby_hash}"
         async with aiosqlite.connect(self.DB_FILE) as db:
             query = f'SELECT 1 FROM "{table_name}" WHERE user_id = ?'
@@ -342,9 +403,15 @@ class DatabaseManager:
             result = await cursor.fetchone()
             return result is not None
 
-    async def start_chrono(self, lobby_hash: str, user_id: str, time: datetime.datetime) -> bool:
-        if not await self._lobby_exists(lobby_hash) or not await self.is_in_lobby(user_id, lobby_hash):
-            return False
+    async def start_chrono(self, lobby_name: str, user_id: str, time: datetime.datetime) -> int:
+        '''
+        Returns SUCCESS, INVALID_LOBBY, USER_NOT_IN_LOBBY, CHRONO_ALREADY_RUNNING
+        '''
+        lobby_hash = self._security.generate_lobby_hash(lobby_name)
+        if not await self._lobby_exists(lobby_hash):
+            return DatabaseEnums.INVALID_LOBBY
+        elif not await self._is_in_lobby(user_id, lobby_hash):
+            return DatabaseEnums.USER_NOT_IN_LOBBY
 
         table_name = f"lobby_{lobby_hash}"
         async with aiosqlite.connect(self.DB_FILE) as db:
@@ -353,16 +420,22 @@ class DatabaseManager:
             result = await cursor.fetchone()
 
             if result and result['is_running']:
-                return False
+                return DatabaseEnums.CHRONO_ALREADY_RUNNING
 
             update_query = f'UPDATE "{table_name}" SET is_running = ?, last_entry = ? WHERE user_id = ?'
             await db.execute(update_query, (True, time.isoformat(), user_id))
             await db.commit()
-            return True
+            return DatabaseEnums.SUCCESS
 
-    async def stop_chrono(self, lobby_hash: str, user_id: str, time: datetime.datetime) -> tuple[bool, int]:
-        if not await self._lobby_exists(lobby_hash) or not await self.is_in_lobby(user_id, lobby_hash):
-            return (False, 0)
+    async def stop_chrono(self, lobby_name: str, user_id: str, time: datetime.datetime) -> tuple[int, int]:
+        '''
+        Returns SUCCESS, INVALID_LOBBY, USER_NOT_IN_LOBBY, CHRONO_ALREADY_NOT_RUNNING
+        '''
+        lobby_hash = self._security.generate_lobby_hash(lobby_name)
+        if not await self._lobby_exists(lobby_hash):
+            return (DatabaseEnums.INVALID_LOBBY, 0)
+        elif not await self._is_in_lobby(user_id, lobby_hash):
+            return (DatabaseEnums.USER_NOT_IN_LOBBY, 0)
 
         table_name = f"lobby_{lobby_hash}"
         async with aiosqlite.connect(self.DB_FILE) as db:
@@ -371,7 +444,7 @@ class DatabaseManager:
             user_row = await cursor.fetchone()
 
             if not user_row or not user_row['is_running'] or user_row['last_entry'] is None:
-                return (False, 0)
+                return (DatabaseEnums.CHRONO_ALREADY_NOT_RUNNING, 0)
 
             last_entry_time = datetime.datetime.fromisoformat(
                 user_row['last_entry'])
@@ -382,4 +455,4 @@ class DatabaseManager:
             update_query = f'UPDATE "{table_name}" SET is_running = ?, last_entry = NULL, total_seconds = ? WHERE user_id = ?'
             await db.execute(update_query, (False, new_total_seconds, user_id))
             await db.commit()
-            return (True, seconds_to_add)
+            return (DatabaseEnums.SUCCESS, seconds_to_add)

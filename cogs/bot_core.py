@@ -1,7 +1,6 @@
 from discord import app_commands, DMChannel, Forbidden, Message, Interaction, Embed, Color, NotFound
 from discord.ext import commands
-from database_manager import DatabaseManager
-import datetime
+from database_manager import DatabaseManager, DatabaseEnums
 import asyncio
 import smile
 
@@ -63,11 +62,6 @@ class BotCore(commands.Cog):
         author = interaction.user
         await interaction.response.defer()
 
-        user_has_free_slots = await self.db.user_has_free_slots(user_id)
-        if not user_has_free_slots:
-            await interaction.followup.send("You don't have room for a new lobby. Limit of 10 lobbies is reached.", ephemeral=True)
-            return
-
         password = None
         if not is_public:
             password = await self._send_await_pm_interaction(interaction, "Please type your password here.")
@@ -76,47 +70,62 @@ class BotCore(commands.Cog):
         else:
             await interaction.followup.send("Creating new lobby...", ephemeral=True)
 
-        hash = ""
-        hash = await self.db.create_lobby(user_id=user_id,
-                                          name=name,
-                                          is_public=is_public,
-                                          password=password.content if password is not None else None
-                                          )
-
-        await interaction.followup.send(f"Lobby **{name}** was created.\n||Hash: **{hash}**||", ephemeral=True)
+        result = await self.db.create_lobby(user_id=user_id,
+                                            name=name,
+                                            is_public=is_public,
+                                            password=password.content if password is not None else None
+                                            )
+        match result:
+            case DatabaseEnums.PASSWORD_NOT_ENTERED:
+                await interaction.followup.send("Password not entered for private lobby! Lobby could not be created!", ephemeral=True)
+            case DatabaseEnums.USER_HAS_NO_FREE_SLOTS:
+                await interaction.followup.send("You don't have room for a new lobby. Limit of 10 lobbies is reached.", ephemeral=True)
+            case DatabaseEnums.LOBBY_EXISTS:
+                await interaction.followup.send(f"Lobby with name **{name}** already exists.", ephemeral=True)
+            case DatabaseEnums.SUCCESS:
+                await interaction.followup.send(f"Lobby **{name}** was created.", ephemeral=True)
+            case _:
+                await interaction.followup.send(f"Something unexpected happened.", ephemeral=True)
 
     @app_commands.command(name="start_chrono",  description="Starts the chronometer for your studies")
     @app_commands.describe(lobby_hash="Hash value of the lobby. Can be found under 'my lobbies'")
-    async def start_chrono(self, interaction: Interaction, lobby_hash: str):
+    async def start_chrono(self, interaction: Interaction, lobby_name: str):
         user_id = str(interaction.user.id)
         dttm = interaction.created_at
-        started_chrono = await self.db.start_chrono(lobby_hash, user_id, dttm)
-        lobby_name = await self.db.get_lobby_name(lobby_hash)
-        if started_chrono:
-            await interaction.response.send_message(f"Chronometer started for lobby: **{lobby_name}**", ephemeral=True)
-        else:
-            await interaction.response.send_message("Could not start chronometer. You are either not included in" +
-                                                    " the lobby or the chronometer is already running.", ephemeral=True)
-        return
+        result = await self.db.start_chrono(lobby_name, user_id, dttm)
+        match result:
+            case DatabaseEnums.SUCCESS:
+                await interaction.response.send_message(f"Chronometer started for lobby: **{lobby_name}**", ephemeral=True)
+            case DatabaseEnums.INVALID_LOBBY:
+                await interaction.response.send_message(f"Invalid lobby name: **{lobby_name}**", ephemeral=True)
+            case DatabaseEnums.USER_NOT_IN_LOBBY:
+                await interaction.response.send_message(f"You are not a part of **{lobby_name}**", ephemeral=True)
+            case DatabaseEnums.CHRONO_ALREADY_RUNNING:
+                await interaction.response.send_message(f"Chronometer is already running for **{lobby_name}**", ephemeral=True)
+            case _:
+                await interaction.response.send_message(f"Something unexpected happened.", ephemeral=True)
 
     @app_commands.command(name="stop_chrono",  description="Stops the chronometer for your studies")
     @app_commands.describe(lobby_hash="Hash value of the lobby. Can be found under 'my lobbies'")
-    async def stop_chrono(self, interaction: Interaction, lobby_hash: str):
+    async def stop_chrono(self, interaction: Interaction, lobby_name: str):
         user_id = str(interaction.user.id)
         dttm = interaction.created_at
-        stopped_chrono, recorded_seconds = await self.db.stop_chrono(lobby_hash, user_id, dttm)
-        lobby_name = await self.db.get_lobby_name(lobby_hash)
-        if stopped_chrono:
-
-            total_minutes, seconds = divmod(recorded_seconds, 60)
-            hours, minutes = divmod(total_minutes, 60)
-            await interaction.response.send_message(f"Chronometer stopped for lobby: **{lobby_name}**.\n" +
-                                                    f"Studied for: **{hours}** Hours, **{minutes}** " +
-                                                    f"Minutes and **{seconds}** Seconds. {smile.get_positive_comment()}", ephemeral=True)
-        else:
-            await interaction.response.send_message("Could not stop chronometer. You are either not included in" +
-                                                    " the lobby or the chronometer is already not running.", ephemeral=True)
-        return
+        result, recorded_seconds = await self.db.stop_chrono(lobby_name, user_id, dttm)
+        match result:
+            case DatabaseEnums.SUCCESS:
+                total_minutes, seconds = divmod(recorded_seconds, 60)
+                hours, minutes = divmod(total_minutes, 60)
+                await interaction.response.send_message(f"Chronometer stopped for lobby: **{lobby_name}**.\n" +
+                                                        f"Studied for: **{hours}** Hours, **{minutes}** " +
+                                                        f"Minutes and **{seconds}** Seconds. {smile.get_positive_comment()}", ephemeral=True)
+            case DatabaseEnums.INVALID_LOBBY:
+                await interaction.response.send_message(f"Invalid lobby name: **{lobby_name}**", ephemeral=True)
+            case DatabaseEnums.USER_NOT_IN_LOBBY:
+                await interaction.response.send_message(f"You are not a part of **{lobby_name}**", ephemeral=True)
+            case DatabaseEnums.CHRONO_ALREADY_NOT_RUNNING:
+                await interaction.response.send_message(f"Chronometer is already not running for **{lobby_name}**", ephemeral=True)
+            case _:
+                await interaction.response.send_message(f"Something unexpected happened.", ephemeral=True)
 
     @app_commands.command(name="my_lobbies",  description="Lists your lobbies")
     async def my_lobbies(self, interaction: Interaction):
@@ -129,17 +138,16 @@ class BotCore(commands.Cog):
 
         for lobby_hash in user_lobby_hashes:
             print(lobby_hash)
-            lobby_name = await self.db.get_lobby_name(lobby_hash)
+            lobby_name = await self.db._get_lobby_name(lobby_hash)
             out_string += f":gear:Lobby Name: **{lobby_name}**\n:hammer:Lobby Hash: ||**{lobby_hash}**||\n\n"
 
         await interaction.response.send_message(out_string, ephemeral=True)
 
     @app_commands.command(name="leaderboard",  description="Displays the leaderboard for the given lobby.")
     @app_commands.describe(lobby_hash="Hash value of the lobby. Can be found under 'my lobbies'")
-    async def leaderboard(self, interaction: Interaction, lobby_hash: str):
+    async def leaderboard(self, interaction: Interaction, lobby_name: str):
         await interaction.response.defer()
         user_id = str(interaction.user.id)
-        lobby_name = await self.db.get_lobby_name(lobby_hash)
         embed = Embed(
             title=f"🏆 {lobby_name}",
             description="Top students based on their total study time.",
@@ -147,7 +155,7 @@ class BotCore(commands.Cog):
         )
 
         leaderboard_text = ""
-        users = await self.db.get_lobby_users(lobby_hash)
+        users = await self.db.get_lobby_users(lobby_name)
         users_list: list[tuple[str, int]] = []
         for user_dict in users:
             try:
@@ -174,41 +182,37 @@ class BotCore(commands.Cog):
             embed.description = "The leaderboard is empty!"
         await interaction.followup.send(embed=embed)
 
-        return
-
     @app_commands.command(name="join_lobby",  description="Tries joining a certain lobby.")
     @app_commands.describe(lobby_hash="Hash value of the lobby")
-    async def join_lobby(self, interaction: Interaction, lobby_hash: str):
-
-        lobby_exists = await self.db.check_lobby_all(lobby_hash)
-        if not lobby_exists:
-            await interaction.response.send_message(f"Could not join lobby with hash: **{lobby_hash}** . " +
-                                                    "Check if both the hash and password are correct", ephemeral=True)
-            return
+    async def join_lobby(self, interaction: Interaction, lobby_name: str):
 
         # TODO: combine password check in one function
-        is_public = await self.db.is_public(lobby_hash)
+        is_public = await self.db.is_public(lobby_name)
         password = None
         if not is_public:
             message = await self._send_await_pm_interaction(interaction, "Enter the password for the lobby you are trying to join.")
             if message is None:
-                await interaction.response.send_message(f"Could not join lobby with hash: **{lobby_hash}** . " +
-                                                        "Check if both the hash and password are correct", ephemeral=True)
+                await interaction.response.send_message(f"Could not join lobby: **{lobby_name}** . " +
+                                                        "Check if both the name and password are correct", ephemeral=True)
                 return
             password = message.content
 
         user_id = str(interaction.user.id)
 
-        user_added = False
-        user_added = await self.db.join_lobby(lobby_hash, user_id, password)
-
-        lobby_name = await self.db.get_lobby_name(lobby_hash)
-        if user_added:
-            await interaction.response.send_message(f"You have joined **{lobby_name}** !\n||Hash: {lobby_hash}||", ephemeral=True)
-        else:
-            await interaction.response.send_message(f"Could not join lobby with hash: **{lobby_hash}** . " +
-                                                    "Check if both the hash and password are correct", ephemeral=True)
-
+        result = await self.db.join_lobby(lobby_name, user_id, password)
+        match result:
+            case DatabaseEnums.USER_HAS_NO_FREE_SLOTS:
+                await interaction.response.send_message("You don't have room for a new lobby. Limit of 10 lobbies is reached.", ephemeral=True)
+            case DatabaseEnums.SUCCESS:
+                await interaction.response.send_message(f"Joined lobby **{lobby_name}**", ephemeral=True)
+            case DatabaseEnums.USER_ALREADY_EXISTS_IN_LOBBY:
+                await interaction.response.send_message(f"You are already in **{lobby_name}**", ephemeral=True)
+            case DatabaseEnums.INVALID_PASSWORD:
+                await interaction.response.send_message(f"Invalid password for **{lobby_name}**", ephemeral=True)
+            case DatabaseEnums.INVALID_LOBBY:
+                await interaction.response.send_message(f"Lobby with name **{lobby_name}** does not exist.", ephemeral=True)
+            case _:
+                await interaction.response.send_message(f"Something unexpected happened.", ephemeral=True)
         return
 
 

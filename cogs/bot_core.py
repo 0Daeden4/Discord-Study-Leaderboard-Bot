@@ -185,6 +185,7 @@ class BotCore(commands.Cog):
     @app_commands.command(name="join_lobby",  description="Tries joining a certain lobby.")
     @app_commands.describe(lobby_name="Hash value of the lobby")
     async def join_lobby(self, interaction: Interaction, lobby_name: str):
+        await interaction.response.defer()
 
         # TODO: combine password check in one function
         is_public = await self.db.is_public(lobby_name)
@@ -192,8 +193,8 @@ class BotCore(commands.Cog):
         if not is_public:
             message = await self._send_await_pm_interaction(interaction, "Enter the password for the lobby you are trying to join.")
             if message is None:
-                await interaction.response.send_message(f"Could not join lobby: **{lobby_name}** . " +
-                                                        "Check if both the name and password are correct", ephemeral=True)
+                await interaction.followup.send(f"Could not join lobby: **{lobby_name}** . " +
+                                                "Check if both the name and password are correct", ephemeral=True)
                 return
             password = message.content
 
@@ -202,17 +203,17 @@ class BotCore(commands.Cog):
         result = await self.db.join_lobby(lobby_name, user_id, password)
         match result:
             case DatabaseEnums.USER_HAS_NO_FREE_SLOTS:
-                await interaction.response.send_message("You don't have room for a new lobby. Limit of 10 lobbies is reached.", ephemeral=True)
+                await interaction.followup.send("You don't have room for a new lobby. Limit of 10 lobbies is reached.", ephemeral=True)
             case DatabaseEnums.SUCCESS:
-                await interaction.response.send_message(f"Joined lobby **{lobby_name}**", ephemeral=True)
+                await interaction.followup.send(f"Joined lobby **{lobby_name}**", ephemeral=True)
             case DatabaseEnums.USER_ALREADY_EXISTS_IN_LOBBY:
-                await interaction.response.send_message(f"You are already in **{lobby_name}**", ephemeral=True)
+                await interaction.followup.send(f"You are already in **{lobby_name}**", ephemeral=True)
             case DatabaseEnums.INVALID_PASSWORD:
-                await interaction.response.send_message(f"Invalid password for **{lobby_name}**", ephemeral=True)
+                await interaction.followup.send(f"Invalid password for **{lobby_name}**", ephemeral=True)
             case DatabaseEnums.INVALID_LOBBY:
-                await interaction.response.send_message(f"Lobby with name **{lobby_name}** does not exist.", ephemeral=True)
+                await interaction.followup.send(f"Lobby with name **{lobby_name}** does not exist.", ephemeral=True)
             case _:
-                await interaction.response.send_message(f"Something unexpected happened.", ephemeral=True)
+                await interaction.followup.send(f"Something unexpected happened.", ephemeral=True)
         return
 
 

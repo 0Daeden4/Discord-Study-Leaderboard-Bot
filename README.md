@@ -15,16 +15,16 @@ Every user has 10 free lobby slots for now.
 Creates a lobby with the given name and assigns the author as admin. If the lobby is set to private, then the bot will send the user a private message to assign the password to the lobby (make sure DMs are enabled!).
 
 ## join_lobby
-Lets the user join a lobby with the given hash. If the lobby is private, the bot will send the user a private message to confirm the password of the lobby (make sure DMs are enabled!).
+Lets the user join a lobby with the given name. If the lobby is private, the bot will send the user a private message to confirm the password of the lobby (make sure DMs are enabled!).
 
 ## my_lobbies
-Lists the lobbies the user has joined/created. The hash values below the names can be used to start/stop chronometers and invite your friends to join your lobby using the join_lobby command.
+Lists the lobbies the user has joined/created.
 
 ## start/stop_chrono
-Starts/Stops a chronometer for a given lobby hash only if the user is in the said lobby.
+Starts/Stops a chronometer for a given lobby name only if the user is in the said lobby.
 
 ## leave_lobby (not implemented yet)
-Lets the user leave a lobby with the given hash.
+Lets the user leave a lobby with the given name.
 
 ## kick_from_lobby (not implemented yet)
 Lets the user kick another user from a lobby. (requires admin role in the lobby)
